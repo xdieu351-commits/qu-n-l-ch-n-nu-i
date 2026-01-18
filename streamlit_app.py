@@ -6,12 +6,12 @@ import os
 
 # --- 1. CẤU HÌNH TRANG ---
 st.set_page_config(
-    page_title="Hệ thống Quản Lý Chăn Nuôi",
+    page_title="Quản Lý Chăn Nuôi",
     page_icon="🐄",
     layout="wide"
 )
 
-# --- 2. MODEL & DATABASE (Logic xử lý dữ liệu) ---
+# --- 2. LOGIC DATABASE (MODEL) ---
 class ForestryModel:
     def __init__(self, db_name='chan_nuoi.db'):
         self.db_name = db_name
@@ -41,24 +41,19 @@ class ForestryModel:
             conn.commit()
             conn.close()
 
-    def get_data(self, page=1, page_size=1000, search_query=""):
+    def get_data(self, search_query=""):
         conn = self.connect()
-        cursor = conn.cursor()
-        
-        # Sắp xếp ID giảm dần để thấy cái mới nhất
+        # Lấy dữ liệu vào Pandas DataFrame luôn cho tiện xử lý
         query = "SELECT * FROM du_lieu_chan_nuoi WHERE 1=1"
         params = []
-
         if search_query:
             query += " AND (huyen LIKE ? OR xa LIKE ?)"
             params.extend([f"%{search_query}%", f"%{search_query}%"])
-
         query += " ORDER BY id DESC"
         
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
+        df = pd.read_sql_query(query, conn, params=params)
         conn.close()
-        return rows
+        return df
 
     def get_record_by_id(self, record_id):
         conn = self.connect()
@@ -81,12 +76,10 @@ class ForestryModel:
     def update_record(self, record_id, data):
         conn = self.connect()
         cursor = conn.cursor()
-        # data ở đây không bao gồm ID
         sql = '''UPDATE du_lieu_chan_nuoi SET
                  huyen=?, xa=?, nam=?, con_trau=?, con_bo=?, con_lon=?, con_de=?, 
                  tong_xuat_chuong=?, san_luong_thit=?
                  WHERE id=?'''
-        # Thêm record_id vào cuối tuple data
         cursor.execute(sql, data + (record_id,))
         conn.commit()
         conn.close()
@@ -98,7 +91,7 @@ class ForestryModel:
         conn.commit()
         conn.close()
 
-# --- 3. DỮ LIỆU MẪU BẮC KẠN ---
+# --- 3. DỮ LIỆU HÀNH CHÍNH BẮC KẠN ---
 DATA_BAC_KAN = {
     "Thành phố Bắc Kạn": ["Phường Phùng Chí Kiên", "Phường Sông Cầu", "Phường Đức Xuân", "Xã Dương Quang", "Xã Nông Thượng"],
     "Huyện Ba Bể": ["Thị trấn Chợ Rã", "Xã Nam Mẫu", "Xã Khang Ninh", "Xã Quảng Khê", "Xã Đồng Phúc"],
@@ -110,161 +103,139 @@ DATA_BAC_KAN = {
     "Huyện Pác Nặm": ["Xã Bộc Bố", "Xã Cổ Linh", "Xã Nghiên Loan", "Xã Công Bằng", "Xã Nhạn Môn"]
 }
 
-# --- 4. GIAO DIỆN CHÍNH ---
-@st.cache_resource
-def get_model():
-    return ForestryModel()
+# --- 4. GIAO DIỆN CHÍNH (VIEW) ---
+def main():
+    st.title("🐄 HỆ THỐNG QUẢN LÝ CHĂN NUÔI")
+    
+    # Khởi tạo Model
+    model = ForestryModel()
+    
+    # Tạo 4 Tab chức năng rõ ràng
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 XEM DỮ LIỆU", "➕ THÊM MỚI", "✏️ CHỈNH SỬA", "🗑️ XÓA BỎ"])
 
-model = get_model()
-
-# --- SIDEBAR: KHU VỰC NHẬP/SỬA ---
-with st.sidebar:
-    st.header("🛠️ Công cụ Quản lý")
-    
-    # Chế độ: Thêm mới hoặc Cập nhật
-    mode = st.radio("Chọn chức năng:", ["Thêm mới", "Cập nhật bản ghi"], horizontal=True)
-    
-    # Biến lưu giá trị mặc định cho form
-    default_vals = {
-        "huyen": list(DATA_BAC_KAN.keys())[0],
-        "xa": "",
-        "nam": 2024, "trau": 0, "bo": 0, "lon": 0, "de": 0, "xc": 0, "sl": 0.0
-    }
-    
-    current_id = None
-    
-    # Nếu chọn chế độ Cập Nhật -> Hiện ô nhập ID để tìm
-    if mode == "Cập nhật bản ghi":
-        st.info("Nhập ID của bản ghi cần sửa:")
-        col_search_id, col_btn_load = st.columns([2, 1])
-        with col_search_id:
-            input_id = st.number_input("ID bản ghi", min_value=1, step=1, label_visibility="collapsed")
+    # --- TAB 1: XEM DỮ LIỆU ---
+    with tab1:
+        col_search, _ = st.columns([1, 2])
+        search_txt = col_search.text_input("🔍 Tìm kiếm Huyện/Xã:", placeholder="Nhập từ khóa...")
         
-        # Logic lấy dữ liệu cũ lên form
-        record = model.get_record_by_id(input_id)
-        if record:
-            st.success(f"Đã tìm thấy bản ghi ID: {input_id}")
-            current_id = input_id
-            # Gán dữ liệu cũ vào biến default
-            # Record structure: id(0), huyen(1), xa(2), nam(3), trau(4), bo(5), lon(6), de(7), xc(8), sl(9)
-            default_vals["huyen"] = record[1] if record[1] in DATA_BAC_KAN else list(DATA_BAC_KAN.keys())[0]
-            default_vals["xa"] = record[2]
-            default_vals["nam"] = record[3]
-            default_vals["trau"] = record[4]
-            default_vals["bo"] = record[5]
-            default_vals["lon"] = record[6]
-            default_vals["de"] = record[7]
-            default_vals["xc"] = record[8]
-            default_vals["sl"] = record[9]
-        else:
-            st.warning("Không tìm thấy ID này!")
-            current_id = None
-
-    st.markdown("---")
-    st.write(f"### 📝 {mode}")
-
-    # --- INPUT FIELDS (Không dùng st.form để Huyện/Xã nhảy số ngay lập tức) ---
-    
-    # 1. Chọn Huyện (Tác động ngay lập tức đến list Xã)
-    # Lấy index của huyện cũ trong list để set default value
-    try:
-        huyen_index = list(DATA_BAC_KAN.keys()).index(default_vals["huyen"])
-    except ValueError:
-        huyen_index = 0
+        # Load data
+        df = model.get_data(search_query=search_txt)
         
-    huyen_opt = st.selectbox("Huyện", options=list(DATA_BAC_KAN.keys()), index=huyen_index)
-
-    # 2. Chọn Xã (List xã thay đổi theo Huyện vừa chọn)
-    xa_options = DATA_BAC_KAN[huyen_opt]
-    
-    # Cố gắng giữ lại giá trị xã cũ nếu nó nằm trong list huyện mới
-    try:
-        xa_index = xa_options.index(default_vals["xa"])
-    except ValueError:
-        xa_index = 0
+        # Hiển thị Metrics (Thống kê nhanh)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Tổng số bản ghi", len(df))
+        m2.metric("Tổng sản lượng thịt", f"{df['san_luong_thit'].sum():,.2f} tấn")
+        m3.metric("Tổng xuất chuồng", f"{df['tong_xuat_chuong'].sum():,} con")
         
-    xa_opt = st.selectbox("Xã", options=xa_options, index=xa_index)
+        # Hiển thị bảng
+        st.dataframe(
+            df,
+            use_container_width=True,
+            height=500,
+            hide_index=True,
+            column_config={
+                "id": st.column_config.NumberColumn("ID", width="small"),
+                "nam": st.column_config.NumberColumn("Năm", format="%d"),
+                "san_luong_thit": st.column_config.NumberColumn("SL Thịt (Tấn)", format="%.2f"),
+                "tong_xuat_chuong": st.column_config.NumberColumn("Xuất Chuồng (Con)"),
+                "con_trau": "Trâu", "con_bo": "Bò", "con_lon": "Lợn", "con_de": "Dê"
+            }
+        )
 
-    # 3. Các thông tin số liệu
-    nam = st.number_input("Năm", min_value=1990, max_value=2100, value=default_vals["nam"])
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        trau = st.number_input("Trâu (con)", min_value=0, value=default_vals["trau"])
-        bo = st.number_input("Bò (con)", min_value=0, value=default_vals["bo"])
-    with c2:
-        lon = st.number_input("Lợn (con)", min_value=0, value=default_vals["lon"])
-        de = st.number_input("Dê (con)", min_value=0, value=default_vals["de"])
+    # --- TAB 2: THÊM MỚI ---
+    with tab2:
+        st.subheader("Thêm mới vật nuôi")
         
-    xuat_chuong = st.number_input("Tổng xuất chuồng (con)", min_value=0, value=default_vals["xc"])
-    san_luong = st.number_input("Sản lượng thịt (tấn)", min_value=0.0, step=0.1, format="%.2f", value=default_vals["sl"])
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Nút Lưu
-    btn_label = "💾 Thêm Mới" if mode == "Thêm mới" else "💾 Cập Nhật Lưu"
-    if st.button(btn_label, type="primary", use_container_width=True):
-        # Validate cơ bản
-        if trau < 0 or bo < 0 or lon < 0 or de < 0:
-            st.error("Số lượng con không được âm!")
-        else:
-            data = (huyen_opt, xa_opt, nam, trau, bo, lon, de, xuat_chuong, san_luong)
-            
-            if mode == "Thêm mới":
-                model.add_record(data)
-                st.toast("✅ Đã thêm mới thành công!", icon="🎉")
-            else:
-                if current_id:
-                    model.update_record(current_id, data)
-                    st.toast(f"✅ Đã cập nhật bản ghi ID {current_id}!", icon="✏️")
-                else:
-                    st.error("Chưa chọn ID hợp lệ để sửa!")
-            
+        # Chọn Huyện/Xã (Tự động lọc)
+        col_h, col_x, col_n = st.columns(3)
+        huyen_new = col_h.selectbox("Chọn Huyện:", list(DATA_BAC_KAN.keys()), key="add_huyen")
+        xa_new = col_x.selectbox("Chọn Xã:", DATA_BAC_KAN[huyen_new], key="add_xa")
+        nam_new = col_n.number_input("Năm:", 2000, 2100, 2024, key="add_nam")
+        
+        st.write("Số lượng vật nuôi:")
+        c1, c2, c3, c4 = st.columns(4)
+        trau = c1.number_input("Trâu:", 0, key="add_trau")
+        bo = c2.number_input("Bò:", 0, key="add_bo")
+        lon = c3.number_input("Lợn:", 0, key="add_lon")
+        de = c4.number_input("Dê:", 0, key="add_de")
+        
+        c5, c6 = st.columns(2)
+        xc = c5.number_input("Tổng xuất chuồng:", 0, key="add_xc")
+        sl = c6.number_input("Sản lượng thịt (tấn):", 0.0, format="%.2f", key="add_sl")
+        
+        if st.button("Lưu Dữ Liệu Mới", type="primary"):
+            data = (huyen_new, xa_new, nam_new, trau, bo, lon, de, xc, sl)
+            model.add_record(data)
+            st.toast("Đã thêm thành công!", icon="✅")
             time.sleep(1)
             st.rerun()
 
-# --- MAIN PAGE: HIỂN THỊ BẢNG ---
-st.title("🐄 HỆ THỐNG QUẢN LÝ CHĂN NUÔI")
-st.caption("Dữ liệu quản lý tổng đàn và sản lượng thịt hơi xuất chuồng")
-st.markdown("---")
-
-# Thanh tìm kiếm & Xóa nhanh
-col_search, col_del = st.columns([3, 1])
-with col_search:
-    search_query = st.text_input("🔍 Tìm kiếm:", placeholder="Nhập tên Huyện hoặc Xã...")
-
-# Load dữ liệu
-all_data = model.get_data(page=1, page_size=1000, search_query=search_query)
-columns = ["ID", "Huyện", "Xã", "Năm", "Trâu", "Bò", "Lợn", "Dê", "Xuất Chuồng", "Sản Lượng Thịt"]
-df = pd.DataFrame(all_data, columns=columns)
-
-# Hiển thị bảng
-st.dataframe(
-    df, 
-    use_container_width=True,
-    hide_index=True,
-    height=600,
-    column_config={
-        "ID": st.column_config.NumberColumn(width="small"),
-        "Năm": st.column_config.NumberColumn(format="%d", width="small"),
-        "Sản Lượng Thịt": st.column_config.NumberColumn(format="%.2f tấn"),
-    }
-)
-
-# Chức năng xóa bên phải
-with col_del:
-    st.write("") # Spacer
-    with st.popover("🗑️ Xóa bản ghi", help="Nhấn để mở công cụ xóa"):
-        st.markdown("#### Xóa dữ liệu")
-        del_id = st.number_input("Nhập ID cần xóa:", min_value=0, step=1)
-        if st.button("Xác nhận xóa", type="secondary"):
-            if del_id in df["ID"].values:
-                model.delete_record(del_id)
-                st.toast(f"Đã xóa bản ghi ID {del_id}", icon="🗑️")
+    # --- TAB 3: CHỈNH SỬA ---
+    with tab3:
+        st.subheader("Cập nhật thông tin")
+        col_id, col_btn = st.columns([1, 3])
+        edit_id = col_id.number_input("Nhập ID bản ghi cần sửa:", min_value=1, step=1)
+        
+        record = model.get_record_by_id(edit_id)
+        
+        if record:
+            st.info(f"Đang sửa bản ghi: {record[1]} - {record[2]} (Năm {record[3]})")
+            
+            # Form sửa (Pre-fill dữ liệu cũ)
+            col_eh, col_ex, col_en = st.columns(3)
+            
+            # Xử lý Huyện cũ
+            default_huyen = record[1] if record[1] in DATA_BAC_KAN else list(DATA_BAC_KAN.keys())[0]
+            # Key phải khác Tab 2 để không bị conflict
+            huyen_edit = col_eh.selectbox("Huyện:", list(DATA_BAC_KAN.keys()), index=list(DATA_BAC_KAN.keys()).index(default_huyen), key="edit_huyen")
+            
+            # Xử lý Xã cũ
+            xa_list = DATA_BAC_KAN[huyen_edit]
+            default_xa = record[2] if record[2] in xa_list else xa_list[0]
+            xa_edit = col_ex.selectbox("Xã:", xa_list, index=xa_list.index(default_xa), key="edit_xa")
+            
+            nam_edit = col_en.number_input("Năm:", 2000, 2100, record[3], key="edit_nam")
+            
+            ec1, ec2, ec3, ec4 = st.columns(4)
+            trau_e = ec1.number_input("Trâu:", 0, value=record[4], key="edit_trau")
+            bo_e = ec2.number_input("Bò:", 0, value=record[5], key="edit_bo")
+            lon_e = ec3.number_input("Lợn:", 0, value=record[6], key="edit_lon")
+            de_e = ec4.number_input("Dê:", 0, value=record[7], key="edit_de")
+            
+            ec5, ec6 = st.columns(2)
+            xc_e = ec5.number_input("Xuất chuồng:", 0, value=record[8], key="edit_xc")
+            sl_e = ec6.number_input("Sản lượng (tấn):", 0.0, value=record[9], format="%.2f", key="edit_sl")
+            
+            if st.button("Cập Nhật Thay Đổi", type="primary"):
+                data = (huyen_edit, xa_edit, nam_edit, trau_e, bo_e, lon_e, de_e, xc_e, sl_e)
+                model.update_record(edit_id, data)
+                st.toast(f"Đã cập nhật ID {edit_id}!", icon="💾")
                 time.sleep(1)
                 st.rerun()
-            else:
-                st.error("ID không tồn tại!")
+                
+        else:
+            st.warning("Không tìm thấy ID này. Vui lòng kiểm tra lại bên Tab 'Xem Dữ Liệu'.")
 
-st.divider()
-st.info(f"Tổng số bản ghi: **{len(df)}**")
+    # --- TAB 4: XÓA ---
+    with tab4:
+        st.subheader("Xóa dữ liệu")
+        st.warning("Lưu ý: Hành động này không thể hoàn tác!")
+        
+        col_del_id, _ = st.columns([1, 3])
+        del_id = col_del_id.number_input("Nhập ID cần xóa:", min_value=1, step=1, key="del_id_input")
+        
+        # Hiển thị thông tin trước khi xóa để chắc chắn
+        if del_id:
+            rec = model.get_record_by_id(del_id)
+            if rec:
+                st.write(f"Bạn đang chọn xóa: **{rec[1]} - {rec[2]} (ID: {rec[0]})**")
+                if st.button("🔴 Xác Nhận Xóa Vĩnh Viễn"):
+                    model.delete_record(del_id)
+                    st.toast(f"Đã xóa bản ghi ID {del_id}", icon="🗑️")
+                    time.sleep(1)
+                    st.rerun()
+            else:
+                st.caption("Chưa tìm thấy bản ghi phù hợp.")
+
+if __name__ == "__main__":
+    main()
