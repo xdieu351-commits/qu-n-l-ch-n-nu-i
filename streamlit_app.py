@@ -245,4 +245,47 @@ def main():
             
             ec5, ec6 = st.columns(2)
             xc_val = ec5.number_input("Xuất chuồng:", 0, value=rec[8], key="e_form_xc")
-            sl_val = ec6.number_input("Sản lượng:", 0.0, value=rec[9], format="%.
+            sl_val = ec6.number_input("Sản lượng:", 0.0, value=rec[9], format="%.2f", key="e_form_sl")
+            
+            if st.button("Lưu Thay Đổi", type="primary"):
+                data = (h_val, x_val, n_val, t_val, b_val, l_val, d_val, xc_val, sl_val)
+                model.update_record(selected_id, data)
+                st.toast("Cập nhật thành công!", icon="💾")
+                time.sleep(1)
+                st.rerun()
+        else:
+            st.warning(f"Chưa có dữ liệu nào tại {edit_xa_filter}, {edit_huyen_filter}.")
+
+    # ==========================
+    # TAB 4: XÓA BỎ (Chọn vùng -> Chọn bản ghi)
+    # ==========================
+    with tab4:
+        st.subheader("Xóa dữ liệu")
+        st.warning("Chọn vùng để tìm bản ghi cần xóa (An toàn hơn nhập ID thủ công)")
+        
+        cd1, cd2 = st.columns(2)
+        del_huyen_filter = cd1.selectbox("Chọn Huyện:", list(DATA_BAC_KAN.keys()), key="del_filter_huyen")
+        del_xa_filter = cd2.selectbox("Chọn Xã:", DATA_BAC_KAN[del_huyen_filter], key="del_filter_xa")
+        
+        del_df = model.get_data(huyen_filter=del_huyen_filter, xa_filter=del_xa_filter)
+        
+        if not del_df.empty:
+            del_options = {
+                f"ID {row['id']} | Năm {row['nam']} | Tổng XC: {row['tong_xuat_chuong']}": row['id'] 
+                for index, row in del_df.iterrows()
+            }
+            
+            del_selection = st.selectbox("Chọn bản ghi để xóa:", list(del_options.keys()), key="del_select")
+            id_to_del = del_options[del_selection]
+            
+            st.error(f"Bạn có chắc muốn xóa bản ghi: **{del_selection}** ?")
+            if st.button("🔴 Xóa Vĩnh Viễn"):
+                model.delete_record(id_to_del)
+                st.toast(f"Đã xóa bản ghi ID {id_to_del}", icon="🗑️")
+                time.sleep(1)
+                st.rerun()
+        else:
+            st.info("Không có dữ liệu nào ở khu vực này để xóa.")
+
+if __name__ == "__main__":
+    main()
